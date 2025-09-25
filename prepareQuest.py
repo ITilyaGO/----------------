@@ -48,9 +48,9 @@ answer_outline_fill = "white"
 answer_text_fill = "black"
 
 # === НАСТРОЙКИ НУМЕРАЦИИ ТАЙЛОВ ===
-circle_radius_mm = 3.5     # радиус круга в мм
-circle_font_mm = 3.0       # размер цифры в мм
-
+circle_diametr_mm = 4     # радиус круга в мм
+circle_font_mm = 4.5      # размер цифры в мм
+answers_circle_scale = 1
 circle_fill = "white"
 circle_outline = "white"
 circle_outline_width = 1
@@ -58,8 +58,8 @@ circle_text_fill = "black"
 
 # === НАСТРОЙКИ ПОДПИСЕЙ ===
 label_font_mm = 6.0        # размер шрифта для подписей листов (мм)
-grid_label_font_mm = 10.0  # размер шрифта для названия на сетке (мм)
-label_area_mm = 10.0       # высота зоны сверху для подписи (мм)
+grid_label_font_mm = 8.0  # размер шрифта для названия на сетке (мм)
+label_area_mm = grid_label_font_mm       # высота зоны сверху для подписи (мм)
 
 # === ВЫВОД ===
 timestamp = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
@@ -125,8 +125,8 @@ def split_tiles(img, cols, rows, tile_size, exclude_coords):
 
 
 def make_shuffled_sheets(tiles, px_per_mm, dpi):
-    circle_radius_px = int(circle_radius_mm * px_per_mm)
-    circle_font_size = int(2.0 * circle_radius_mm * px_per_mm * 0.9)
+    circle_radius_px = int((circle_diametr_mm / 2) * px_per_mm)
+    circle_font_size = int(circle_diametr_mm * px_per_mm)  # цифра ≈ диаметр круга
     label_font_size = int(label_font_mm * px_per_mm)
 
     num_font = ImageFont.truetype(font_path, circle_font_size)
@@ -160,21 +160,18 @@ def make_shuffled_sheets(tiles, px_per_mm, dpi):
     except OSError:
         ans_font = ImageFont.load_default()
 
-    num_font = ImageFont.truetype(font_path, circle_font_size)
-
     for rot_mode in rotate_modes:
         for sheet_idx in range(0, len(shuf_tiles), tiles_per_sheet):
             page_tiles = shuf_tiles[sheet_idx:sheet_idx + tiles_per_sheet]
+
             label_area_px = int(label_area_mm * px_per_mm)
             sheet_img = Image.new("RGBA", (sheet_w_px, sheet_h_px + label_area_px), (255, 255, 255, 255))
-
 
             ans_label_area_px = int(label_area_mm * px_per_mm * answer_scale)
             ans_sheet_w = int(sheet_w_px * answer_scale)
             ans_sheet_h = int(sheet_h_px * answer_scale) + ans_label_area_px
             answer_img = Image.new("RGBA", (ans_sheet_w, ans_sheet_h), (255, 255, 255, 255))
             draw_ans = ImageDraw.Draw(answer_img)
-
 
             page_table = [["" for _ in range(tiles_per_row)] for _ in range(tiles_per_col)]
 
@@ -194,12 +191,16 @@ def make_shuffled_sheets(tiles, px_per_mm, dpi):
                 offset_x = margin_px + (sheet_w_px - 2*margin_px - grid_w_used) // 2
                 offset_y = margin_px + (sheet_h_px - 2*margin_px - grid_h_used) // 2
 
-                x = offset_x + col * (shuffled_tile_px + gap_px)
-                y = offset_y + row * (shuffled_tile_px + gap_px) + label_area_px
+                # базовые координаты
+                base_x = offset_x + col * (shuffled_tile_px + gap_px)
+                base_y = offset_y + row * (shuffled_tile_px + gap_px)
+
+                # shuffled
+                x = base_x
+                y = base_y + label_area_px
                 sheet_img.paste(tile.resize((shuffled_tile_px, shuffled_tile_px)), (x, y))
 
-
-                # цифра в белом круге
+                # цифра в круге
                 tile_number = str(i + 1)
                 cx = x + shuffled_tile_px - circle_radius_px - 4
                 cy = y + circle_radius_px + 4
@@ -214,15 +215,35 @@ def make_shuffled_sheets(tiles, px_per_mm, dpi):
                 bbox = draw_tile.textbbox((0, 0), tile_number, font=num_font)
                 tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
                 tx = cx - tw // 2
-                ty = cy - th // 2 - bbox[1]   # учёт верхнего отступа шрифта
+                ty = cy - th // 2 - bbox[1]
                 draw_tile.text((tx, ty), tile_number, font=num_font, fill=circle_text_fill)
 
-
-                # мини версия
+                # answers
                 tile_small = tile.resize((t_s, t_s))
-                x_s = int(x * answer_scale)
-                y_s = int(y * answer_scale) + ans_label_area_px
+                x_s = int(base_x * answer_scale)
+                y_s = int(base_y * answer_scale) + ans_label_area_px
                 answer_img.paste(tile_small, (x_s, y_s))
+
+                # круг и цифра для answers
+                circle_radius_ans = int(circle_diametr_mm * answers_circle_scale * px_per_mm * answer_scale)
+                circle_font_size_ans = int(2.0 * circle_diametr_mm * answers_circle_scale * px_per_mm * 0.9 * answer_scale)
+                num_font_ans = ImageFont.truetype(font_path, circle_font_size_ans)
+
+                tile_number = str(i + 1)
+                cx_s = x_s + t_s - circle_radius_ans - 2
+                cy_s = y_s + circle_radius_ans + 2
+                draw_ans.ellipse(
+                    (cx_s - circle_radius_ans, cy_s - circle_radius_ans,
+                    cx_s + circle_radius_ans, cy_s + circle_radius_ans),
+                    fill=circle_fill,
+                    outline=circle_outline,
+                    width=max(1, int(circle_outline_width * answer_scale))
+                )
+                bbox = draw_ans.textbbox((0, 0), tile_number, font=num_font_ans)
+                tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                tx = cx_s - tw // 2
+                ty = cy_s - th // 2 - bbox[1]
+                draw_ans.text((tx, ty), tile_number, font=num_font_ans, fill=circle_text_fill)
 
 
                 tx, ty = center_in_cell(draw_ans, orig_label, x_s, y_s, t_s, t_s, ans_font)
@@ -238,33 +259,28 @@ def make_shuffled_sheets(tiles, px_per_mm, dpi):
                 page_table[row][col] = orig_label
 
             suffix = "_rot" if rot_mode else ""
-            
-            # подпись листа
+
+            # подпись shuffled-листа
             draw_label = ImageDraw.Draw(sheet_img)
             label_font = ImageFont.truetype(font_path, label_font_size)
             label = f"{project_name} - Лист {sheet_idx//tiles_per_sheet+1}{suffix}"
             bbox = draw_label.textbbox((0, 0), label, font=label_font)
             lw, lh = bbox[2] - bbox[0], bbox[3] - bbox[1]
-
             draw_label.text(((sheet_w_px - lw) // 2, (label_area_px - lh) // 2),
                             label, font=label_font, fill="black")
-
 
             out_path = os.path.join(output_dir, f"shuffled_{sheet_idx//tiles_per_sheet+1}{suffix}.png")
             sheet_img.save(out_path, dpi=(dpi, dpi))
 
-            # answers_sheet делаем только если rot_mode == False
+            # подпись answers-листа
             if not rot_mode:
                 draw_label_ans = ImageDraw.Draw(answer_img)
-                bbox = draw_label.textbbox((0, 0), label, font=label_font)
-                lw, lh = bbox[2] - bbox[0], bbox[3] - bbox[1]
                 ans_label_font_size = int(label_font_mm * px_per_mm * answer_scale)
                 ans_label_font = ImageFont.truetype(font_path, ans_label_font_size)
                 bbox = draw_label_ans.textbbox((0, 0), label, font=ans_label_font)
                 lw, lh = bbox[2] - bbox[0], bbox[3] - bbox[1]
                 draw_label_ans.text(((ans_sheet_w - lw) // 2, (ans_label_area_px - lh) // 2),
                                     label, font=ans_label_font, fill="black")
-
 
                 ans_path = os.path.join(output_dir, f"answers_sheet_{sheet_idx//tiles_per_sheet+1}.png")
                 answer_img.save(ans_path, dpi=(dpi, dpi))
@@ -287,7 +303,7 @@ def make_grid(img, cols, rows, tile_size):
     grid_img.paste(img, (tile_size, tile_size + label_area_px))
     draw = ImageDraw.Draw(grid_img)
 
-
+    # линии
     for c in range(cols + 1):
         x = tile_size + c * tile_size
         draw.line([(x, tile_size + label_area_px), (x, grid_h + label_area_px)], fill="black", width=grid_line_width)
@@ -305,13 +321,13 @@ def make_grid(img, cols, rows, tile_size):
     for c in range(cols):
         txt = str(c + 1)
         x, y = center_in_cell(draw, txt, tile_size + c * tile_size, 0, tile_size, tile_size, font_grid)
-        draw.text((x, y), txt, fill="black", font=font_grid)
+        draw.text((x, y + label_area_px), txt, fill="black", font=font_grid)
 
     # буквы слева
     for r in range(rows):
         txt = letters[r]
         x, y = center_in_cell(draw, txt, 0, tile_size + r * tile_size, tile_size, tile_size, font_grid)
-        draw.text((x, y), txt, fill="black", font=font_grid)
+        draw.text((x, y + label_area_px), txt, fill="black", font=font_grid)
 
     # подпись названия
     draw_label = ImageDraw.Draw(grid_img)
@@ -320,8 +336,7 @@ def make_grid(img, cols, rows, tile_size):
     bbox = draw_label.textbbox((0, 0), project_name, font=label_font)
     lw, lh = bbox[2] - bbox[0], bbox[3] - bbox[1]
     draw_label.text(((grid_w - lw) // 2, (label_area_px - lh) // 2),
-                project_name, font=label_font, fill="black")
-
+                    project_name, font=label_font, fill="black")
 
     grid_img.save(output_grid)
 
