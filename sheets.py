@@ -143,6 +143,7 @@ def make_sheet_page(page_tiles, rot_mode, px_per_mm, dpi,
 
     out_path = os.path.join(output_dir, f"shuffled_{page_idx}{suffix}.png")
     sheet_img.save(out_path, dpi=(dpi, dpi))
+    print(f"   ↳ Сохранён {os.path.basename(out_path)}")
 
     # подпись и сохранение answers (только без поворота)
     if not rot_mode:
@@ -152,8 +153,14 @@ def make_sheet_page(page_tiles, rot_mode, px_per_mm, dpi,
         lw, lh = bbox[2] - bbox[0], bbox[3] - bbox[1]
         draw_ans.text(((ans_sheet_w - lw) // 2, (ans_label_area_px - lh) // 2),
                       label, font=ans_label_font, fill="black")
+
         ans_path = os.path.join(output_dir, f"answers_sheet_{page_idx}.png")
         answer_img.save(ans_path, dpi=(dpi, dpi))
+        print(f"   ↳ Сохранён {os.path.basename(ans_path)}")
+
+    print(f"   ↳ Сохранён {os.path.basename(out_path)}")
+    if not rot_mode:
+        print(f"   ↳ Сохранён {os.path.basename(ans_path)}")
 
     return page_table, suffix, page_idx, rot_mode
 
@@ -182,14 +189,17 @@ def make_shuffled_sheets(tiles, px_per_mm, dpi, output_dir):
     random.shuffle(shuf_tiles)
 
     total_pages = math.ceil(len(shuf_tiles) / tiles_per_sheet)
+    print(f"🧩 Генерация shuffled-листов... (всего {total_pages} страниц, {len(tiles)} тайлов)")
 
     # Собираем задачи: для КАЖДОГО номера страницы — оба режима с одним и тем же page_idx
     jobs = []
     with ProcessPoolExecutor() as executor:
         for idx in range(1, total_pages + 1):
+            print(f"  • Планируем лист {idx}")
             start = (idx - 1) * tiles_per_sheet
             end = start + tiles_per_sheet
             page_tiles = shuf_tiles[start:end]
+            print(f"  • Планируем лист {idx} ({len(page_tiles)} тайлов)")
 
             for rot_mode in modes:
                 jobs.append(executor.submit(
@@ -215,5 +225,6 @@ def make_shuffled_sheets(tiles, px_per_mm, dpi, output_dir):
         answers_log.append(f"\n=== Лист {idx}{suffix} ===\n")
         for r in page_table:
             answers_log.append("\t".join(r))
-
+            
+    print("✅ Shuffled-листы готовы")
     return answers_log
