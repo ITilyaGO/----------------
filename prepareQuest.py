@@ -408,7 +408,7 @@ if __name__ == "__main__":
         tiles = split_tiles(img, cols, rows, tile_size, exclude_coords)
         answers_log = make_shuffled_sheets(tiles, px_per_mm, dpi)
         save_answers(answers_log, random_seed)
-        make_grid(img, cols, rows, tile_size)
+        make_grid(img, cols, rows, tile_size, px_per_mm)  # ✅ новый вызов
         print("\n✅ Готово!")
         print(f"📂 Папка: {output_dir}")
         print(f"📄 Ответы: {output_answers_txt}")

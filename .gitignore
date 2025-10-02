@@ -2,3 +2,4 @@ out/*
 *.tif
 *.png
 white_tiles.txt
+__pycache__/
