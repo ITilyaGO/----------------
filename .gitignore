@@ -1,3 +1,4 @@
 out/*
 *.tif
 *.png
+white_tiles.txt

@@ -4,9 +4,9 @@ import os
 import datetime
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
+import argparse
 
-
-random_seed = 654352   # None = случайно, число = фиксированный порядок
+random_seed = 6323521   # None = случайно, число = фиксированный порядок
 
 if random_seed is not None:
     random.seed(random_seed)
@@ -16,15 +16,16 @@ else:
 
 
 # === НАСТРОЙКИ ===
-project_name = "Хмельники"   # общее название проекта
+project_name = "Галахово"   # общее название проекта
 
-input_file = "Хмельники (10 000)_без линий.tif"
+input_file = "Галахово 1200.tif"
 cols = 9
 rows = 13
 grid_line_width = 16
 font_scale = 1
 save_tiles = False
-exclude_coords = ["А2","А3","А4","А5","Б3","Б4","Б5","В4","В5"]
+# exclude_coords = []
+# exclude_coords = ["А2","А3","А4","А5","Б3","Б4","Б5","В4","В5"]
 tile_mm_target = 30.0
 
 # путь к шрифту
@@ -180,7 +181,7 @@ def make_shuffled_sheets(tiles, px_per_mm, dpi):
                 orig_label = f"{letters[row_o]}{col_o+1}"
 
                 if rot_mode:
-                    angle = random.choice([0, 90, 180, 270])
+                    angle = random.choice([90, 180, 270])
                     tile = tile.rotate(angle, expand=True)
 
                 row = i // tiles_per_row
@@ -258,7 +259,7 @@ def make_shuffled_sheets(tiles, px_per_mm, dpi):
 
                 page_table[row][col] = orig_label
 
-            suffix = "_rot" if rot_mode else ""
+            suffix = " с поворотом" if rot_mode else ""
 
             # подпись shuffled-листа
             draw_label = ImageDraw.Draw(sheet_img)
@@ -340,6 +341,24 @@ def make_grid(img, cols, rows, tile_size):
 
     grid_img.save(output_grid)
 
+def detect_white_tiles(img, cols, rows, tile_size, threshold=250):
+    """
+    Ищет полностью белые (или почти белые) тайлы.
+    threshold — порог яркости (0-255), выше = более "строго белые".
+    """
+    whites = []
+    for row in range(rows):
+        for col in range(cols):
+            box = (col * tile_size, row * tile_size,
+                   (col + 1) * tile_size, (row + 1) * tile_size)
+            tile = img.crop(box)
+            # усредняем цвет (по яркости)
+            stat = tile.convert("L").getextrema()
+            min_val, max_val = stat
+            if min_val >= threshold:  # значит тайл почти весь белый
+                coord = f"{letters[row]}{col+1}"
+                whites.append(coord)
+    return whites
 
 def save_answers(log, seed):
     with open(output_answers_txt, "w", encoding="utf-8") as f:
@@ -352,11 +371,44 @@ def save_answers(log, seed):
 
 # === MAIN ===
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--detect-whites", action="store_true",
+                        help="Режим: только поиск белых тайлов и вывод в файл white_tiles.txt")
+    args = parser.parse_args()
+
+    # Загружаем изображение
     img, tile_size, px_per_mm, dpi = load_image(input_file, cols, rows, tile_mm_target)
-    tiles = split_tiles(img, cols, rows, tile_size, exclude_coords)
-    answers_log = make_shuffled_sheets(tiles, px_per_mm, dpi)
-    save_answers(answers_log, random_seed)
-    make_grid(img, cols, rows, tile_size)
-    print("\n✅ Готово!")
-    print(f"📂 Папка: {output_dir}")
-    print(f"📄 Ответы: {output_answers_txt}")
+
+    if args.detect_whites:
+        whites = detect_white_tiles(img, cols, rows, tile_size)
+        whites_file = "white_tiles.txt"
+        with open(whites_file, "w", encoding="utf-8") as f:
+            f.write("exclude_coords = [\n")
+            for w in whites:
+                f.write(f'    "{w}",\n')
+            f.write("]\n")
+        print(f"📄 Найдено {len(whites)} белых тайлов")
+        print(f"💾 Список сохранён в {whites_file}")
+    else:
+        # читаем список исключённых тайлов (если есть файл white_tiles.txt)
+        whites_file = "white_tiles.txt"
+        exclude_coords = []
+        if os.path.exists(whites_file):
+            with open(whites_file, "r", encoding="utf-8") as f:
+                text = f.read()
+            try:
+                local_vars = {}
+                exec(text, {}, local_vars)
+                exclude_coords = local_vars.get("exclude_coords", [])
+                print(f"📖 Загружены исключения из {whites_file}: {exclude_coords}")
+            except Exception as e:
+                print(f"⚠️ Ошибка чтения {whites_file}: {e}")
+
+        # основной цикл
+        tiles = split_tiles(img, cols, rows, tile_size, exclude_coords)
+        answers_log = make_shuffled_sheets(tiles, px_per_mm, dpi)
+        save_answers(answers_log, random_seed)
+        make_grid(img, cols, rows, tile_size)
+        print("\n✅ Готово!")
+        print(f"📂 Папка: {output_dir}")
+        print(f"📄 Ответы: {output_answers_txt}")
