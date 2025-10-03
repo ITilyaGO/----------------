@@ -1,4 +1,5 @@
 out/*
+inputs/*
 *.tif
 *.png
 white_tiles.txt
