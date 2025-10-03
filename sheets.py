@@ -24,6 +24,69 @@ def layout_sheet_params(px_per_mm):
     return shuffled_tile_px, gap_px, margin_px, sheet_w_px, sheet_h_px
 
 
+def generate_non_conflicting_rows(tiles, tiles_per_row, min_distance=1, max_attempts=50000):
+    """
+    Формирует строки shuffled-листа так, чтобы:
+      • клетки не были ближе min_distance по оригинальной сетке
+      • в строке не совпадали буквы (строки)
+      • в строке не совпадали цифры (колонки)
+    Если идеально не получается, берём лучший вариант и логируем конфликты.
+    """
+    rows = []
+    available = tiles[:]
+    random.shuffle(available)
+
+    def count_conflicts(row_tiles):
+        labels = [f"{letters[r]}{c+1}" for (r, c), _ in row_tiles]
+        conflicts = []
+        used_rows = set()
+        used_cols = set()
+        for i, lab1 in enumerate(labels):
+            r1, c1 = letters.index(lab1[0]), int(lab1[1:]) - 1
+
+            # проверка совпадения строки или столбца
+            if lab1[0] in used_rows:
+                conflicts.append((lab1, f"строка {lab1[0]}"))
+            if c1 in used_cols:
+                conflicts.append((lab1, f"колонка {c1+1}"))
+
+            used_rows.add(lab1[0])
+            used_cols.add(c1)
+
+            # проверка близости
+            for j, lab2 in enumerate(labels):
+                if i >= j:
+                    continue
+                r2, c2 = letters.index(lab2[0]), int(lab2[1:]) - 1
+                if abs(r1 - r2) <= min_distance and abs(c1 - c2) <= min_distance:
+                    conflicts.append((lab1, lab2))
+        return conflicts
+
+    for _ in range(math.ceil(len(tiles) / tiles_per_row)):
+        best_row = None
+        best_conflicts = None
+
+        for attempt in range(max_attempts):
+            row_tiles = random.sample(available, min(tiles_per_row, len(available)))
+            conflicts = count_conflicts(row_tiles)
+            if not conflicts:  # идеальная строка
+                best_row, best_conflicts = row_tiles, conflicts
+                break
+            if best_conflicts is None or len(conflicts) < len(best_conflicts):
+                best_row, best_conflicts = row_tiles, conflicts
+
+        if best_conflicts:  # если всё-таки есть конфликты
+            print(f"⚠️ Не удалось избежать {len(best_conflicts)} конфликт(ов) в строке:")
+            for a, b in best_conflicts:
+                print(f"   └─ {a} конфликтует с {b}")
+
+        rows.append(best_row)
+        for tile in best_row:
+            available.remove(tile)
+
+    return [t for row in rows for t in row]
+
+
 def draw_tile_on_sheet(sheet_img, tile, i, x, y, shuffled_tile_px, circle_radius_px, num_font):
     draw_tile = ImageDraw.Draw(sheet_img)
     sheet_img.paste(tile.resize((shuffled_tile_px, shuffled_tile_px)), (x, y))
@@ -185,8 +248,8 @@ def make_shuffled_sheets(tiles, px_per_mm, dpi, output_dir):
         modes = [False]
 
     # тасуем тайлы один раз
-    shuf_tiles = tiles[:]
-    random.shuffle(shuf_tiles)
+    shuf_tiles = generate_non_conflicting_rows(tiles, tiles_per_row, min_distance=1)
+
 
     total_pages = math.ceil(len(shuf_tiles) / tiles_per_sheet)
     print(f"🧩 Генерация shuffled-листов... (всего {total_pages} страниц, {len(tiles)} тайлов)")

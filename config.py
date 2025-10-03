@@ -2,11 +2,11 @@ import os, datetime
 from PIL import Image
 
 # Сид
-random_seed = 6323521
+random_seed = 63235212
 
 # Основное
 project_name = "Галахово"
-input_file = "Галахово 1200.tif"
+input_file = "inputs/Галахово 1200_noroads.tif"
 
 cols, rows = 9, 13
 grid_line_width = 16
@@ -15,11 +15,12 @@ save_tiles = False
 tile_mm_target = 30.0
 
 # Шрифты
-font_path = "DearType - Lifehack Sans Medium.otf"
+font_path = "resources/DearType - Lifehack Sans Medium.otf"
 Image.MAX_IMAGE_PIXELS = None
 letters = list("АБВГДЕЖИКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ")
 
 # Настройки листов
+sheet_export_dpi = 1200
 sheet_w_mm, sheet_h_mm = 210, 297
 shuffled_tile_mm = 30
 gap_mm, margin_mm = 2.5, 3
