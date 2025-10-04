@@ -5,10 +5,10 @@ from PIL import Image
 random_seed = 63235212
 
 # Основное
-project_name = "Галахово"
-input_file = "inputs/Галахово 1200_noroads.tif"
+project_name = "Галахово рельеф 20x28"
+input_file = "inputs/Галахово лонг (1,2,3,4)noroad_ultrarelef.tif"
 
-cols, rows = 9, 13
+cols, rows = 20, 28
 grid_line_width = 16
 font_scale = 1
 save_tiles = False
@@ -22,7 +22,7 @@ letters = list("АБВГДЕЖИКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ")
 # Настройки листов
 sheet_export_dpi = 1200
 sheet_w_mm, sheet_h_mm = 210, 297
-shuffled_tile_mm = 30
+shuffled_tile_mm = 20
 gap_mm, margin_mm = 2.5, 3
 rotate_tiles = None
 answer_scale = 0.25

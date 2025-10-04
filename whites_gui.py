@@ -1,17 +1,41 @@
 import os
 import tkinter as tk
-from PIL import Image, ImageTk
-from config import input_file, cols, rows
+from PIL import Image, ImageTk, Image
+from config_manager import auto_load_project, save_config
 from image_loader import load_image
+import warnings
+import argparse
 
-# === Загружаем изображение и параметры ===
+
+# === Отключаем предупреждения о "бомбах распаковки" ===
+warnings.simplefilter('ignore', Image.DecompressionBombWarning)
+Image.MAX_IMAGE_PIXELS = None
+
+# --- Аргументы командной строки ---
+parser = argparse.ArgumentParser()
+parser.add_argument("--project", type=str, help="Имя проекта для открытия")
+args = parser.parse_args()
+
+# --- Загружаем проект через менеджер ---
+project_name, config = auto_load_project(args.project)
+
+input_file = config.get("input_file")
+cols = config.get("cols", 9)
+rows = config.get("rows", 13)
+
+if not input_file or not os.path.exists(input_file):
+    print(f"❌ Файл '{input_file}' не найден. Укажите корректный путь в конфиге проекта '{project_name}'.")
+    exit(1)
+
+# === Загружаем изображение ===
 img, tile_size, px_per_mm, dpi = load_image(input_file, cols, rows)
 
-# === Папка и имя файла исключений ===
-base_name = os.path.splitext(os.path.basename(input_file))[0]
+# === Путь к файлу исключений ===
 inputs_dir = "inputs"
 os.makedirs(inputs_dir, exist_ok=True)
-whites_file = os.path.join(inputs_dir, f"{base_name}_white_tiles.txt")
+whites_file = config.get("exclude_file") or os.path.join(inputs_dir, f"{project_name}_white_tiles.txt")
+config["exclude_file"] = whites_file
+save_config(project_name, config)
 
 # === Настройки ===
 tile_w, tile_h = tile_size, tile_size
@@ -19,8 +43,8 @@ letters = list("АБВГДЕЖИКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ")
 
 # === GUI ===
 root = tk.Tk()
-root.title("Выбор белых тайлов")
-root.geometry("900x900")  # стартовое окно
+root.title(f"Выбор белых тайлов — {project_name}")
+root.geometry("1000x900")
 
 canvas = tk.Canvas(root, bg="white")
 canvas.pack(fill=tk.BOTH, expand=True)
@@ -29,18 +53,19 @@ excluded = set()
 scale = 1.0
 tk_img = None
 
-# --- Загружаем список исключений, если файл есть ---
+# === Загружаем уже сохранённые исключения ===
 if os.path.exists(whites_file):
     try:
         local_vars = {}
         exec(open(whites_file, encoding="utf-8").read(), {}, local_vars)
         excluded = set(local_vars.get("exclude_coords", []))
-        print(f"📖 Загружены исключения из {whites_file}: {excluded}")
+        print(f"📖 Загружены исключения из {whites_file}: {len(excluded)} шт.")
     except Exception as e:
         print(f"⚠️ Ошибка чтения {whites_file}: {e}")
 else:
     print(f"ℹ️ Файл {whites_file} не найден, начнём с пустого списка.")
 
+# === Функции ===
 def coord_to_label(x, y):
     row = int(y // (tile_h * scale))
     col = int(x // (tile_w * scale))
@@ -49,7 +74,6 @@ def coord_to_label(x, y):
     return None
 
 def redraw():
-    """Перерисовать картинку и выделения"""
     global tk_img, scale
     w = canvas.winfo_width()
     h = canvas.winfo_height()
@@ -65,7 +89,15 @@ def redraw():
     canvas.delete("all")
     canvas.create_image(0, 0, anchor="nw", image=tk_img)
 
-    # выделить красным уже исключённые клетки
+    # --- рисуем сетку ---
+    for r in range(rows + 1):
+        y = r * tile_h * scale
+        canvas.create_line(0, y, tile_w * cols * scale, y, fill="black", width=1)
+    for c in range(cols + 1):
+        x = c * tile_w * scale
+        canvas.create_line(x, 0, x, tile_h * rows * scale, fill="black", width=1)
+
+
     for label in excluded:
         if not label or label[0] not in letters:
             continue
@@ -75,7 +107,7 @@ def redraw():
         y1 = row * tile_h * scale
         x2 = x1 + tile_w * scale
         y2 = y1 + tile_h * scale
-        canvas.create_rectangle(x1+1, y1+1, x2-1, y2-1, outline="red", width=1, tags=label)
+        canvas.create_rectangle(x1+1, y1+1, x2-1, y2-1, outline="red", width=2, tags=label)
 
 def on_click(event):
     label = coord_to_label(event.x, event.y)
@@ -94,15 +126,16 @@ def save_file():
             f.write(f'    "{w}",\n')
         f.write("]\n")
     print(f"💾 Сохранено {len(excluded)} исключений в {whites_file}")
+    config["exclude_file"] = whites_file
+    save_config(project_name, config)
     root.destroy()
 
+# === Привязки ===
 canvas.bind("<Button-1>", on_click)
 canvas.bind("<Configure>", lambda e: redraw())
 
-btn = tk.Button(root, text="Сохранить и выйти", command=save_file)
+btn = tk.Button(root, text="💾 Сохранить и выйти", command=save_file)
 btn.pack(pady=5)
 
-# первая отрисовка с учётом уже загруженных исключений
 root.after(100, redraw)
-
 root.mainloop()

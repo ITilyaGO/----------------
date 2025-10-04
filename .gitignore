@@ -1,5 +1,6 @@
 out/*
 inputs/*
+configs/*
 *.tif
 *.png
 white_tiles.txt
