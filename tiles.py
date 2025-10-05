@@ -65,7 +65,7 @@ def generate_random_state(cfg, tiles):
         start = page_idx * tiles_per_sheet
         end = min(start + tiles_per_sheet, total_tiles)
         page_tiles = tiles[start:end]
-
+        rot_angles = cfg.rotate_tiles
         # Создаём пустые матрицы
         matrix = []
         rotation_matrix = []
@@ -80,11 +80,10 @@ def generate_random_state(cfg, tiles):
                     row_coords.append(coord)
 
                     # Генерация поворотов
-                    if cfg.rotate_tiles:
-                        angle = random.choice([0, 90, 180, 270])
-                    elif cfg.rotate_tiles is None:
-                        # 50% листов с поворотами
-                        angle = random.choice([0, 0, 90, 180, 270])
+                    if cfg.rotate_tiles is None:
+                        angle = random.choice([90, 180, 270])
+                    elif isinstance(rot_angles, (list, tuple)) and all(isinstance(x, (int, float)) for x in rot_angles):
+                        angle = random.choice(rot_angles)
                     else:
                         angle = 0
                     row_rotations.append(angle)
