@@ -1,109 +1,116 @@
-import multiprocessing
-multiprocessing.freeze_support()
-
 import argparse
 import os
-import random
-import datetime
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from config_manager import auto_load_project, save_config, apply_config_overrides
+from config import Config
 from image_loader import load_image
-from white_tiles import detect_white_tiles
-from tiles import split_tiles
-from sheets import make_shuffled_sheets
+from tiles import split_tiles, load_random_state, generate_random_state
+from white_tiles import detect_white_tiles, save_white_tiles, load_white_tiles
 from grid import make_grid
+from sheets import make_sheets_from_state
 from io_helpers import save_answers
-import config  # ✅ импортируем сам модуль, а не отдельные переменные
 
 
-if __name__ == "__main__":  # 🧩 ВСЁ строго внутри этого блока
+def task_grid(cfg, img, tile_size, px_per_mm, dpi, output_dir):
+    """Параллельная задача — генерация сетки."""
+    output_path = os.path.join(output_dir, "grid.png")
+    make_grid(cfg, img, tile_size, px_per_mm, dpi, output_path)
+    return f"💾 Сетка сохранена → {output_path}"
 
-    # === Аргументы ===
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--detect-whites", action="store_true",
-                        help="Режим: только поиск белых тайлов и вывод в файл white_tiles.txt")
+
+def task_sheets(cfg, img_tiles, state, px_per_mm, dpi, output_dir, threads, selected_pages):
+    """Параллельная задача — генерация shuffled и answers-листов."""
+    results = make_sheets_from_state(cfg, img_tiles, state, px_per_mm, dpi, output_dir,
+                                     threads=threads, pages=selected_pages)
+    # results = [(shuffled_path, answers_path), ...]
+    answers_log = [f"{os.path.basename(s)}, {os.path.basename(a)}" for s, a in results]
+
+    answers_txt = os.path.join(output_dir, "answers.txt")
+    save_answers(answers_log, cfg.random_seed, answers_txt)
+    return f"💾 Сгенерированы shuffled/answers-листы → {answers_txt}"
+
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="🧩 Генератор листов проекта")
+    parser.add_argument("--project", type=str, help="Имя проекта (папка в out/)")
+    parser.add_argument("--detect-whites", action="store_true", help="Только поиск белых тайлов")
+    parser.add_argument("--reshuffle", action="store_true", help="Пересоздать random_state.json")
+    parser.add_argument("--pages", type=str, help="Список страниц через запятую (например 1,3,5)")
+    parser.add_argument("--threads", type=int, default=None, help="Количество потоков для листов")
+
     args = parser.parse_args()
 
-    # === Загружаем проект ===
-    project_name, config_dict = auto_load_project()
-    apply_config_overrides(config_dict, "config")  # ✅ исправлено: передаём сам модуль config
-    print(f"📁 Текущий проект: {project_name}")
+    # === Конфиг ===
+    project_name = args.project or Config.get_last_project() or input("Введите имя проекта: ").strip()
+    cfg = Config().load(project_name)
+    Config.set_last_project(project_name)
+    cfg.init_random()
 
     # === Проверяем входной файл ===
-    if not config.input_file or not os.path.exists(config.input_file):
-        print(f"❌ Ошибка: файл '{config.input_file}' не найден. Укажите корректный путь в конфиге проекта '{project_name}'.")
+    if not cfg.input_file or not os.path.exists(cfg.input_file):
+        print(f"❌ Ошибка: файл '{cfg.input_file}' не найден.")
         exit(1)
 
-    # === Инициализация сида ===
-    if config.random_seed is not None:
-        random.seed(config.random_seed)
-        print(f"🔑 Используется фиксированный сид: {config.random_seed}")
-    else:
-        print("🎲 Сид не задан (будет случайный порядок)")
-
-    # === Папки ===
-    timestamp = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
-    output_dir = os.path.join("out", project_name, timestamp)
-    os.makedirs(output_dir, exist_ok=True)
-
-    output_grid = os.path.join(output_dir, "grid.png")
-    output_answers_txt = os.path.join(output_dir, "answers.txt")
-
-    # === Загрузка изображения ===
-    print("📂 Загружаем изображение...")
-    img, tile_size, px_per_mm, dpi = load_image(config.input_file, config.cols, config.rows)
-
-    # === Авто-DPI ===
+    # === Загружаем изображение ===
+    img, tile_size, px_per_mm, dpi = load_image(cfg.input_file, cfg.cols, cfg.rows)
+    output_dir = cfg.make_output_dir()
+    # === Авто-DPI как в старом коде ===
     w_px, h_px = img.size
-    dpi_x = w_px / (config.sheet_w_mm / 25.4)
-    dpi_y = h_px / (config.sheet_h_mm / 25.4)
+    dpi_x = w_px / (cfg.sheet_w_mm / 25.4)
+    dpi_y = h_px / (cfg.sheet_h_mm / 25.4)
     export_dpi = (dpi_x + dpi_y) / 2
-    print(f"📐 Авто-DPI для печати: {export_dpi:.2f}")
-
     px_per_mm = export_dpi / 25.4
 
-    # === Белые тайлы ===
-    inputs_dir = "inputs"
-    os.makedirs(inputs_dir, exist_ok=True)
-    whites_file = config_dict.get("exclude_file") or os.path.join(inputs_dir, f"{project_name}_white_tiles.txt")
-    config_dict["exclude_file"] = whites_file
-    save_config(project_name, config_dict)
+    # Разделяем только на случай, если ты всё же хочешь разное
+    px_per_mm_grid = px_per_mm
+    px_per_mm_sheets = px_per_mm
+    dpi_grid = export_dpi
+    dpi_sheets = export_dpi
 
-    # === Режим поиска белых ===
+    print(f"📐 Авто-DPI для печати: {export_dpi:.2f}")
+    print(f"ℹ️ px_per_mm: {px_per_mm:.3f}")
+
+
+    # === Режим: поиск белых тайлов ===
     if args.detect_whites:
-        whites = detect_white_tiles(img, config.cols, config.rows, tile_size)
-        with open(whites_file, "w", encoding="utf-8") as f:
-            f.write("exclude_coords = [\n")
-            for w in whites:
-                f.write(f'    "{w}",\n')
-            f.write("]\n")
-        print(f"📄 Найдено {len(whites)} белых тайлов → {whites_file}")
+        whites = detect_white_tiles(img, cfg)
+        save_white_tiles(cfg, whites)
+        print("✅ Белые тайлы сохранены. Завершено.")
         exit(0)
 
-    # === Загрузка исключений ===
-    exclude_coords = []
-    if os.path.exists(whites_file):
-        local_vars = {}
-        exec(open(whites_file, encoding="utf-8").read(), {}, local_vars)
-        exclude_coords = local_vars.get("exclude_coords", [])
-        print(f"📖 Загружены исключения ({len(exclude_coords)}): {exclude_coords}")
+    # === Загружаем white_tiles и state ===
+    exclude_coords = load_white_tiles(cfg)
+    tiles = split_tiles(img, cfg, exclude_coords)
+    img_tiles = {coord: tile for (_, coord, tile) in tiles}
+
+    state = load_random_state(cfg)
+    if args.reshuffle or not state:
+        state = generate_random_state(cfg, tiles)
+
+    # === Список страниц (если указан) ===
+    if args.pages:
+        selected_indices = [int(x) for x in args.pages.split(",")]
+        selected_pages = [p for p in state["pages"] if p["index"] in selected_indices]
     else:
-        print(f"⚠️ Файл {whites_file} не найден. Можно создать его через whites_gui.py")
+        selected_pages = None
 
-    # === Разбиение тайлов ===
-    tiles = split_tiles(img, config.cols, config.rows, tile_size, exclude_coords)
+    print("🚀 Запуск параллельной генерации...")
 
-    # === Параллельная генерация ===
-    with ProcessPoolExecutor() as executor:
-        fut_sheets = executor.submit(make_shuffled_sheets, tiles, px_per_mm, export_dpi, output_dir)
-        fut_grid = executor.submit(make_grid, img, config.cols, config.rows, tile_size, px_per_mm, export_dpi, output_grid)
+    # === Параллельно запускаем grid и sheets ===
+    tasks = []
+    with ProcessPoolExecutor(max_workers=2) as pool:
+        # GRID рендерим со своим dpi_grid/px_per_mm_grid
+        tasks.append(pool.submit(task_grid, cfg, img, tile_size, px_per_mm_grid, dpi_grid, output_dir))
 
-        answers_log = fut_sheets.result()
-        fut_grid.result()
+        # SHEETS рендерим с dpi_sheets/px_per_mm_sheets
+        tasks.append(pool.submit(task_sheets, cfg, img_tiles, state,
+                                px_per_mm_sheets, dpi_sheets, output_dir,
+                                args.threads, selected_pages))
 
-    # === Сохранение ===
-    save_answers(answers_log, config.random_seed, output_answers_txt)
+
+        for fut in as_completed(tasks):
+            print(fut.result())
+
     print("\n✅ Готово!")
-    print(f"📂 Папка: {output_dir}")
-    print(f"📄 Ответы: {output_answers_txt}")
+    print(f"📂 Папка проекта: {output_dir}")
